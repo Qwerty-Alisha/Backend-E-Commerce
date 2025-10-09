@@ -41,3 +41,7 @@ server.get('/',(req, res)=>{
 server.listen(8080, ()=>{
     console.log('server started')
 })
+
+server.use(cors({
+    exposedHeaders: ['X-Total-Count'], // <--- THIS IS REQUIRED
+}));

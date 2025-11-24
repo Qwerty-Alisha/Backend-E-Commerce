@@ -10,6 +10,8 @@ const jwt = require('jsonwebtoken');
 const JwtStrategy = require('passport-jwt').Strategy;
 const ExtractJwt = require('passport-jwt').ExtractJwt;
 const cookieParser = require('cookie-parser');
+const path = require('path'); // <--- REQUIRED for serving build
+
 const { createProduct } = require('./controller/Product');
 const productsRouter = require('./routes/Products');
 const categoriesRouter = require('./routes/Categories');
@@ -29,9 +31,8 @@ opts.jwtFromRequest = cookieExtractor;
 opts.secretOrKey = SECRET_KEY;
 
 // Middlewares
-server.use(express.static('build'))
+server.use(express.static(path.resolve(__dirname, 'build'))); // <--- Use path.resolve for safety
 server.use(cookieParser());
-server.use(express.static('build')); // Serve build files if needed
 server.use(
   session({
     secret: 'keyboard cat',
@@ -45,10 +46,11 @@ server.use(
     exposedHeaders: ['X-Total-Count'],
   })
 );
-server.use(express.json()); // to parse req.body
+// Move JSON parser to the top so it applies to all requests
+server.use(express.json()); 
 
 // ROUTES
-// 1. Allow Public Access to Products (Removed isAuth here)
+// API Routes must come FIRST
 server.use('/products', productsRouter.router); 
 server.use('/categories', isAuth(), categoriesRouter.router);
 server.use('/brands', isAuth(), brandsRouter.router);
@@ -57,15 +59,22 @@ server.use('/auth', authRouter.router);
 server.use('/cart', isAuth(), cartRouter.router);
 server.use('/orders', isAuth(), ordersRouter.router);
 
+// ✅ CRITICAL FIX: React Router Catch-All
+// If a request comes in that doesn't match the API routes above, 
+// send the React index.html file. This fixes 404s on page refresh.
+server.use((req, res) => {
+  res.sendFile(path.resolve(__dirname, 'build', 'index.html'));
+});
+
 // Passport Strategies
 passport.use(
   'local',
   new LocalStrategy(
-    { usernameField: 'email' }, // <--- FIX 1: Tell passport to look for email
+    { usernameField: 'email' },
     async function (email, password, done) {
       try {
         const user = await User.findOne({ email: email });
-      console.log(email, password, user);
+        // console.log(email, password, user);
         
         if (!user) {
           return done(null, false, { message: 'invalid credentials' }); 
@@ -100,7 +109,7 @@ passport.use(
 passport.use(
   'jwt',
   new JwtStrategy(opts, async function (jwt_payload, done) {
-    console.log({ jwt_payload });
+    // console.log({ jwt_payload });
     try {
       const user = await User.findById(jwt_payload.id);
       if (user) {

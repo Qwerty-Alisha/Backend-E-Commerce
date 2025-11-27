@@ -10,8 +10,6 @@ const jwt = require('jsonwebtoken');
 const JwtStrategy = require('passport-jwt').Strategy;
 const ExtractJwt = require('passport-jwt').ExtractJwt;
 const cookieParser = require('cookie-parser');
-const path = require('path'); // <--- REQUIRED for serving build
-
 const { createProduct } = require('./controller/Product');
 const productsRouter = require('./routes/Products');
 const categoriesRouter = require('./routes/Categories');
@@ -21,23 +19,26 @@ const authRouter = require('./routes/Auth');
 const cartRouter = require('./routes/Cart');
 const ordersRouter = require('./routes/Order');
 const { User } = require('./model/User');
+const path = require('path'); // ✅ REQUIRED for serving build
 const { isAuth, sanitizeUser, cookieExtractor } = require('./services/common');
 
-const SECRET_KEY = 'SECRET_KEY'; // TODO: Move to .env in production
-
+const SECRET_KEY = 'SECRET_KEY';
 // JWT options
+
+
 const opts = {};
 opts.jwtFromRequest = cookieExtractor;
-opts.secretOrKey = SECRET_KEY;
+opts.secretOrKey = SECRET_KEY; // TODO: should not be in code;
 
-// Middlewares
-server.use(express.static(path.resolve(__dirname, 'build'))); // <--- Use path.resolve for safety
+//middlewares
+server.use(express.static(path.resolve(__dirname, 'build'))); // Use path.resolve for safety
+server.use(express.static('build'))
 server.use(cookieParser());
 server.use(
   session({
     secret: 'keyboard cat',
-    resave: false,
-    saveUninitialized: false,
+    resave: false, // don't save session if unmodified
+    saveUninitialized: false, // don't create session until something stored
   })
 );
 server.use(passport.authenticate('session'));
@@ -46,12 +47,9 @@ server.use(
     exposedHeaders: ['X-Total-Count'],
   })
 );
-// Move JSON parser to the top so it applies to all requests
-server.use(express.json()); 
-
-// ROUTES
-// API Routes must come FIRST
-server.use('/products', productsRouter.router); 
+server.use(express.json()); // to parse req.body
+server.use('/products', productsRouter.router);
+// we can also use JWT token for client-only auth
 server.use('/categories', isAuth(), categoriesRouter.router);
 server.use('/brands', isAuth(), brandsRouter.router);
 server.use('/users', isAuth(), usersRouter.router);
@@ -59,9 +57,6 @@ server.use('/auth', authRouter.router);
 server.use('/cart', isAuth(), cartRouter.router);
 server.use('/orders', isAuth(), ordersRouter.router);
 
-// ✅ CRITICAL FIX: React Router Catch-All
-// If a request comes in that doesn't match the API routes above, 
-// send the React index.html file. This fixes 404s on page refresh.
 server.use((req, res) => {
   res.sendFile(path.resolve(__dirname, 'build', 'index.html'));
 });
@@ -70,50 +65,43 @@ server.use((req, res) => {
 passport.use(
   'local',
   new LocalStrategy(
-    { usernameField: 'email' },
+    {usernameField:'email'},
     async function (email, password, done) {
-      try {
-        const user = await User.findOne({ email: email });
-        // console.log(email, password, user);
-        
-        if (!user) {
-          return done(null, false, { message: 'invalid credentials' }); 
-        }
-        
-        // Salt check
-        if (!user.salt) {
-             return done(null, false, { message: 'User data corrupted (no salt)' });
-        }
-
-        crypto.pbkdf2(
-          password,
-          user.salt,
-          310000,
-          32,
-          'sha256',
-          async function (err, hashedPassword) {
-            if (!crypto.timingSafeEqual(user.password, hashedPassword)) {
-              return done(null, false, { message: 'invalid credentials' });
-            }
-            const token = jwt.sign(sanitizeUser(user), SECRET_KEY);
-            done(null, {token}); // this lines sends to serializer
-          }
-        );
-      } catch (err) {
-        done(err);
+    // by default passport uses username
+    try {
+      const user = await User.findOne({ email: email });
+      console.log(email, password, user);
+      if (!user) {
+        return done(null, false, { message: 'invalid credentials' }); // for safety
       }
+      crypto.pbkdf2(
+        password,
+        user.salt,
+        310000,
+        32,
+        'sha256',
+        async function (err, hashedPassword) {
+          if (!crypto.timingSafeEqual(user.password, hashedPassword)) {
+            return done(null, false, { message: 'invalid credentials' });
+          }
+          const token = jwt.sign(sanitizeUser(user), SECRET_KEY);
+          done(null, { id: user.id, role: user.role }); // this lines sends to serializer
+        }
+      );
+    } catch (err) {
+      done(err);
     }
-  )
+  })
 );
 
 passport.use(
   'jwt',
   new JwtStrategy(opts, async function (jwt_payload, done) {
-    // console.log({ jwt_payload });
+    console.log({ jwt_payload });
     try {
       const user = await User.findById(jwt_payload.id);
       if (user) {
-        return done(null, sanitizeUser(user));
+        return done(null, sanitizeUser(user)); // this calls serializer
       } else {
         return done(null, false);
       }
@@ -123,20 +111,23 @@ passport.use(
   })
 );
 
-// Serializer
+// this creates session variable req.user on being called from callbacks
 passport.serializeUser(function (user, cb) {
+  console.log('serialize', user);
   process.nextTick(function () {
     return cb(null, { id: user.id, role: user.role });
   });
 });
 
+// this changes session variable req.user when called from authorized request
+
 passport.deserializeUser(function (user, cb) {
+  console.log('de-serialize', user);
   process.nextTick(function () {
     return cb(null, user);
   });
 });
 
-// Database Connection
 main().catch((err) => console.log(err));
 
 async function main() {

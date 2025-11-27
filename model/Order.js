@@ -9,6 +9,8 @@ const orderSchema = new Schema({
   paymentMethod: { type: String, required: true },
   status: { type: String, default: 'pending' },
   selectedAddress: { type: Schema.Types.Mixed, required: true },
+  serialNumber: { type: String, required: false }, // optional for old orders
+  orderPlacedAt: { type: String, required: false },
 }, { timestamps: true }); // Added timestamps to track createdAt
 
 const virtual = orderSchema.virtual('id');

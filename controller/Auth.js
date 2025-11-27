@@ -29,7 +29,7 @@ exports.createUser = async (req, res) => {
                 httpOnly: true,
               })
               .status(201)
-              .json(token);
+              .json({id:doc.id, role:doc.role});
           }
         });
       }
@@ -40,15 +40,23 @@ exports.createUser = async (req, res) => {
 };
 
 exports.loginUser = async (req, res) => {
+  // ✅ FIX: Generate Token here explicitly
+  const user = req.user;
+  const token = jwt.sign(sanitizeUser(user), SECRET_KEY);
+
   res
-    .cookie('jwt', req.user.token, {
+    .cookie('jwt', token, {
       expires: new Date(Date.now() + 3600000),
       httpOnly: true,
     })
     .status(201)
-    .json(req.user.token);
+    .json({ id: user.id, role: user.role }); // Send user info, not just token string
 };
 
-exports.checkUser = async (req, res) => {
-  res.json({status:'success',user: req.user});
-};
+exports.checkAuth = async (req, res) => {
+  if(req.user){
+    res.json(req.user);
+  } else{
+    res.sendStatus(401);
+  }
+}
